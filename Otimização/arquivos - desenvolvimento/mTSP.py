@@ -398,17 +398,20 @@ class TSPModel:
         self.x = {(i, j): 1 if model.x[i, j].value == 1.0 else 0 for i in model.all_nodes for j in model.all_nodes}
 
     def solve_partitioned(self, timelimit, partition):
-        if partition == 'four':
+        if partition == 4:
             self.linear_partition_four()
             nodes_set = self.nodes_set_f
-        elif partition == 'three':
+        elif partition == 3:
             self.linear_partition_three()
             nodes_set = self.nodes_set_t
         elif partition == 'cluster':
             self.k_mean_cluster()
             nodes_set = self.nodes_set_c
-        elif partition == 'two':
+        elif partition == 2:
+            self.linear_partition()
             nodes_set = self.nodes_set
+        elif partition == 1:
+            nodes_set = [self.all_nodes]
         else:
             print('Modelo de particao --{}-- não existe'.format(partition))
             exit()
@@ -437,8 +440,7 @@ class TSPModel:
             print('variables created')
             model.obj = Objective(
                 expr=sum(
-                    model.d[nodes[i], nodes[j]] * model.x[i, j, k]
-                    for i in model.all_nodes for j in model.all_nodes for k in model.days),
+                    model.d[nodes[i], nodes[j]] * model.x[i, j, k] for i in model.all_nodes for j in model.all_nodes for k in model.days),
                 sense=minimize
             )
             model.constset4 = ConstraintList()
@@ -510,10 +512,10 @@ class TSPModel:
             self.output['total_distance'] += sum(self.d[i, j] * model.x[i, j, k].value
                                                  for i in model.all_nodes
                                                  for j in model.all_nodes
-                                                 for k in model.days if model.x[i, j, k].value is None)
+                                                 for k in model.days if model.x[i, j, k].value is not None)
             for i in model.all_nodes:
                 for j in model.all_nodes:
-                    if sum(model.x[i, j, k].value for k in model.days if model.x[i, j, k].value is None) == 1.0:
+                    if sum(model.x[i, j, k].value for k in model.days if model.x[i, j, k].value is not None) == 1.0:
                         self.x[nodes[i], nodes[j]] = 1
                     else:
                         self.x[nodes[i], nodes[j]] = 0
@@ -537,7 +539,7 @@ class TSPModel:
                         if r[1] == 0:
                             finish = True
 
-    def generate_results(self):
+    def generate_results(self, i):
         self.get_results()
         dia = 1
         for arcs in self.arcs_sequence:
@@ -553,10 +555,10 @@ class TSPModel:
         self.output['total_time_in_hours'] = sum(seq['time(h)'] for seq in self.output['sequences'])
         self.output['total_number_of_days'] = dia - 1
         self.output['average_working_time'] = self.output['total_time_in_hours'] / dia - 1
-        file = open('backup_output.txt', 'w')
+        file = open('results/vendedor_{}_output.txt'.format(self.salesman[i]['id']), 'w')
         file.write(str(self.output))
-        print('Objeto de resposta do modelo:')
-        print(self.output)
+        # print('Objeto de resposta do modelo:')
+        # print(self.output)
 
     def show_results(self):
         dia = 1
@@ -575,7 +577,7 @@ class TSPModel:
             print('dia {}: {} | tempo (h): {} | dist (km): {}'.format(dia, resp, time_span, distance))
             dia += 1
 
-    def plot_solution(self):
+    def plot_solution(self, i):
         from itertools import cycle
         cycol = cycle('bgrcmk')
         x = [self.coordinates[i][0] for i in self.client_nodes]
@@ -589,18 +591,18 @@ class TSPModel:
             color = next(cycol)
             for arc in arcs:
                 self.connect_points(x, y, arc[0], arc[1], color)
-        plt.show()
+        plt.savefig('results/vendedor_{}_output.png'.format(self.salesman[i]['id']))
 
-    def save_on_google(self):
+    def save_on_google(self, i):
         gc = self.connect_to_google()
-        wks = gc.open(self.spreadsheet_name).get_worksheet(1)
+        wks = gc.open('resultados - rotas').worksheet(self.salesman[i]['id'])
         i = 2
-        columns = ['id', 'fantasia', 'NOMECLIENTE', 'ENDERECO', 'dia', 'ordem']
+        columns = ['ENTIDADEID', 'DESCRICAO', 'ENDEREÇO', 'dia', 'ordem']
         for day in self.output['sequences']:
             j = 1
             for node in day['sequence']:
                 if node != 0:
-                    cell_list = wks.range(i, 1, i, 6)
+                    cell_list = wks.range(i, 1, i, 5)
                     exp_index = next((index for (index, d) in enumerate(self.data) if d["id"] == node), None)
                     for cell, column in zip(cell_list, columns):
                         if column != 'dia' and column != 'ordem':
@@ -666,8 +668,27 @@ if __name__ == '__main__':
     # instance.generate_results()
     # instance.save_on_google()
     # instance.plot_solution()
-    instance.get_salesman()
-    instance.get_coordinates(0)
-    print(instance.coordinates)
+    t = 600
+    for i in range(-1, -21, -1):
+        instance.get_salesman()
+        instance.get_coordinates(i)
+        instance.distance_set()
+        print(instance.salesman[i])
+        print(instance.coordinates)
+        n = len(instance.coordinates) / 26
+        if n <= 1:
+            instance.solve_partitioned(timelimit=t, partition=1)
+        elif 1 < n <= 2:
+            instance.solve_partitioned(timelimit=t, partition=2)
+        elif 2 < n <= 3:
+            instance.solve_partitioned(timelimit=t, partition=2)
+        else:
+            instance.solve_partitioned(timelimit=t, partition=4)
+        instance.generate_results(i)
+        instance.plot_solution(i)
+
+
+    # instance.solve_partitioned(timelimit=600, partition=1)
+    # instance.generate_results()
     # instance.k_mean_cluster(4)
     # instance.plot_coordinates()
